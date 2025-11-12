@@ -7,36 +7,35 @@ pipeline {
       steps { checkout scm }
     }
 
-    stage('Prep Maven (robusto)') {
+    stage('Prep Maven (sin PowerShell)') {
       steps {
         bat '''
-        setlocal EnableDelayedExpansion
+        setlocal
         set MVER=3.9.9
-        set ZIP=apache-maven-%MVER%-bin.zip
-        set DIR=apache-maven-%MVER%
-
         if not exist .maven (
           echo ==== Descargando Maven %MVER% ====
-          powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command ^
-            "$urls=@( ^
-              'https://dlcdn.apache.org/maven/maven-3/%env:MVER%/binaries/%env:ZIP%', ^
-              'https://archive.apache.org/dist/maven/maven-3/%env:MVER%/binaries/%env:ZIP%' ^
-            ); ^
-            $ok=$false; ^
-            foreach($u in $urls){ try{ Write-Host ('Intentando ' + $u); Invoke-WebRequest -UseBasicParsing -Uri $u -OutFile 'maven.zip'; if((Get-Item 'maven.zip').Length -gt 0){ $ok=$true; break } } catch { } }; ^
-            if(-not $ok){ Write-Error 'No se pudo descargar Maven desde ningun mirror.'; exit 1 }"
+          for %%U in (
+            https://dlcdn.apache.org/maven/maven-3/%MVER%/binaries/apache-maven-%MVER%-bin.zip
+            https://archive.apache.org/dist/maven/maven-3/%MVER%/binaries/apache-maven-%MVER%-bin.zip
+          ) do (
+            echo Intentando %%U
+            curl.exe -L --retry 3 --retry-delay 2 -o maven.zip "%%U"
+            if exist maven.zip goto :gotzip
+          )
+          echo ERROR: No se pudo descargar Maven desde ningun mirror.
+          exit /b 1
 
-          powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command ^
-            "Expand-Archive -Path 'maven.zip' -DestinationPath . -Force"
-          if not exist "%DIR%" (
-            echo ERROR: No se descomprimio %DIR%.
+          :gotzip
+          echo ==== Extrayendo Maven ====
+          powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Path 'maven.zip' -DestinationPath '.' -Force"
+          if not exist "apache-maven-%MVER%" (
+            echo ERROR: No se encontro carpeta apache-maven-%MVER% tras descomprimir.
             dir
             exit /b 1
           )
-          ren "%DIR%" .maven
+          ren "apache-maven-%MVER%" .maven
           del maven.zip
         )
-
         if not exist ".maven\\bin\\mvn.cmd" (
           echo ERROR: Maven no quedo disponible en .maven\\bin\\mvn.cmd
           exit /b 1
