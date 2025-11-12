@@ -7,70 +7,43 @@ pipeline {
       steps { checkout scm }
     }
 
-    stage('Prep Maven (robusto)') {
+    stage('Prep Maven') {
       steps {
-        bat '''
-        @echo off
-        setlocal ENABLEDELAYEDEXPANSION
-        set MVER=3.9.9
-        set ZIP=apache-maven-%MVER%-bin.zip
-        set DIR=apache-maven-%MVER%
+        powershell '''
+          $ErrorActionPreference = "Stop"
+          $ver = "3.9.9"
+          $zip = "apache-maven-$ver-bin.zip"
+          $dir = "apache-maven-$ver"
 
-        if exist .maven\\bin\\mvn.cmd goto done
+          if (-not (Test-Path ".maven\\bin\\mvn.cmd")) {
+            Write-Host "==== Descargando Maven $ver ===="
+            $urls = @(
+              "https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/$ver/$zip",
+              "https://archive.apache.org/dist/maven/maven-3/$ver/binaries/$zip"
+            )
 
-        echo ==== Descargando Maven %MVER% ====
-        set URL1=https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/%MVER%/%ZIP%
-        set URL2=https://archive.apache.org/dist/maven/maven-3/%MVER%/binaries/%ZIP%
-        set URL3=https://dlcdn.apache.org/maven/maven-3/%MVER%/binaries/%ZIP%
+            Remove-Item -Force -ErrorAction SilentlyContinue maven.zip
+            $downloaded = $false
+            foreach ($u in $urls) {
+              try {
+                Write-Host "Intentando $u"
+                Invoke-WebRequest -UseBasicParsing -Uri $u -OutFile "maven.zip"
+                if ((Get-Item "maven.zip").Length -gt 1MB) { $downloaded = $true; break }
+                else { Write-Warning "Zip muy pequeño, reintentando con otro mirror..." }
+              } catch { Write-Warning $_.Exception.Message }
+            }
+            if (-not $downloaded) { throw "No se pudo descargar Maven desde ningun mirror." }
 
-        if exist maven.zip del /q maven.zip
+            Write-Host "==== Extrayendo Maven ===="
+            Expand-Archive -Path "maven.zip" -DestinationPath "." -Force
+            if (-not (Test-Path $dir)) { throw "No se encontró carpeta $dir tras descomprimir." }
 
-        call :trydl "%%URL1%%"
-        if not exist maven.zip call :trydl "%%URL2%%"
-        if not exist maven.zip call :trydl "%%URL3%%"
+            if (Test-Path ".maven") { Remove-Item -Recurse -Force ".maven" }
+            Rename-Item $dir ".maven" -Force
+            Remove-Item -Force maven.zip
+          }
 
-        if not exist maven.zip (
-          echo ERROR: No se pudo descargar Maven desde ningun mirror.
-          exit /b 1
-        )
-
-        for %%A in (maven.zip) do set SIZE=%%~zA
-        if not defined SIZE (
-          echo ERROR: Descarga vacia.
-          exit /b 1
-        )
-        if !SIZE! LSS 1000000 (
-          echo ERROR: Zip corrupto (solo !SIZE! bytes).
-          del /q maven.zip
-          exit /b 1
-        )
-
-        echo ==== Extrayendo Maven (tar primero, luego PowerShell si falla) ====
-        tar -xf maven.zip 2>nul
-        if not exist "%DIR%" (
-          powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Path 'maven.zip' -DestinationPath '.' -Force"
-        )
-        if not exist "%DIR%" (
-          echo ERROR: No se pudo extraer %DIR%.
-          dir
-          exit /b 1
-        )
-
-        ren "%DIR%" .maven
-        del /q maven.zip
-
-        :done
-        if not exist ".maven\\bin\\mvn.cmd" (
-          echo ERROR: Maven no quedo en .maven\\bin\\mvn.cmd
-          exit /b 1
-        )
-        exit /b 0
-
-        :trydl
-        set URL=%~1
-        echo Intentando %URL%
-        curl.exe -fSL -o maven.zip %URL% 2>nul
-        exit /b 0
+          if (-not (Test-Path ".maven\\bin\\mvn.cmd")) { throw "Maven no quedó disponible en .maven\\bin\\mvn.cmd" }
         '''
       }
     }
