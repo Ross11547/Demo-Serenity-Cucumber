@@ -7,40 +7,70 @@ pipeline {
       steps { checkout scm }
     }
 
-    stage('Prep Maven (sin PowerShell)') {
+    stage('Prep Maven (robusto)') {
       steps {
         bat '''
-        setlocal
+        @echo off
+        setlocal ENABLEDELAYEDEXPANSION
         set MVER=3.9.9
-        if not exist .maven (
-          echo ==== Descargando Maven %MVER% ====
-          for %%U in (
-            https://dlcdn.apache.org/maven/maven-3/%MVER%/binaries/apache-maven-%MVER%-bin.zip
-            https://archive.apache.org/dist/maven/maven-3/%MVER%/binaries/apache-maven-%MVER%-bin.zip
-          ) do (
-            echo Intentando %%U
-            curl.exe -L --retry 3 --retry-delay 2 -o maven.zip "%%U"
-            if exist maven.zip goto :gotzip
-          )
+        set ZIP=apache-maven-%MVER%-bin.zip
+        set DIR=apache-maven-%MVER%
+
+        if exist .maven\\bin\\mvn.cmd goto done
+
+        echo ==== Descargando Maven %MVER% ====
+        set URL1=https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/%MVER%/%ZIP%
+        set URL2=https://archive.apache.org/dist/maven/maven-3/%MVER%/binaries/%ZIP%
+        set URL3=https://dlcdn.apache.org/maven/maven-3/%MVER%/binaries/%ZIP%
+
+        if exist maven.zip del /q maven.zip
+
+        call :trydl "%%URL1%%"
+        if not exist maven.zip call :trydl "%%URL2%%"
+        if not exist maven.zip call :trydl "%%URL3%%"
+
+        if not exist maven.zip (
           echo ERROR: No se pudo descargar Maven desde ningun mirror.
           exit /b 1
-
-          :gotzip
-          echo ==== Extrayendo Maven ====
-          powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Path 'maven.zip' -DestinationPath '.' -Force"
-          if not exist "apache-maven-%MVER%" (
-            echo ERROR: No se encontro carpeta apache-maven-%MVER% tras descomprimir.
-            dir
-            exit /b 1
-          )
-          ren "apache-maven-%MVER%" .maven
-          del maven.zip
         )
-        if not exist ".maven\\bin\\mvn.cmd" (
-          echo ERROR: Maven no quedo disponible en .maven\\bin\\mvn.cmd
+
+        for %%A in (maven.zip) do set SIZE=%%~zA
+        if not defined SIZE (
+          echo ERROR: Descarga vacia.
           exit /b 1
         )
-        endlocal
+        if !SIZE! LSS 1000000 (
+          echo ERROR: Zip corrupto (solo !SIZE! bytes).
+          del /q maven.zip
+          exit /b 1
+        )
+
+        echo ==== Extrayendo Maven (tar primero, luego PowerShell si falla) ====
+        tar -xf maven.zip 2>nul
+        if not exist "%DIR%" (
+          powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Path 'maven.zip' -DestinationPath '.' -Force"
+        )
+        if not exist "%DIR%" (
+          echo ERROR: No se pudo extraer %DIR%.
+          dir
+          exit /b 1
+        )
+
+        ren "%DIR%" .maven
+        del /q maven.zip
+
+        :done
+        if not exist ".maven\\bin\\mvn.cmd" (
+          echo ERROR: Maven no quedo en .maven\\bin\\mvn.cmd
+          exit /b 1
+        )
+        exit /b 0
+
+        :trydl
+        set URL=%~1
+        echo Intentando %URL%
+        curl.exe -fSL -o maven.zip %URL% 2>nul
+        exit /b 0
         '''
       }
     }
