@@ -1,17 +1,23 @@
 pipeline {
     agent any
 
+    tools {
+        // el nombre debe ser EXACTAMENTE igual al de Jenkins
+        maven 'Maven 3.8.6'
+    }
+
     stages {
         stage('Checkout') {
             steps {
                 git 'https://github.com/Laura4lilavati/Demo-Serenity-Cucumber.git'
-                // si quieres usar tu fork, cambia la URL a:
+                // o tu fork:
                 // git 'https://github.com/Ross11547/Demo-Serenity-Cucumber.git'
             }
         }
 
         stage('Build & Test') {
             steps {
+                bat 'mvn -version'
                 bat 'mvn clean verify'
             }
         }
